@@ -1,6 +1,5 @@
 from numpy import *
 
-
 def data():
     path = "/home2/zh/data/ml-100k/u.data"
     with open(path, 'r', encoding='ISO-8859-1') as f:
