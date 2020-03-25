@@ -1,5 +1,12 @@
 from numpy import *
 
+import torch
+from torch import nn, optim
+from torch.nn import functional as F
+from torch.nn import ModuleList as ML
+from torch.nn import ParameterList as PL
+import numpy as np
+
 def data():
     path = "/home2/zh/data/ml-100k/u.data"
     with open(path, 'r', encoding='ISO-8859-1') as f:
@@ -67,13 +74,6 @@ def data():
     #sum(i_content[:,0]==1)
     
     return interaction, u_content, i_content
-
-import torch
-from torch import nn, optim
-from torch.nn import functional as F
-from torch.nn import ModuleList as ML
-from torch.nn import ParameterList as PL
-import numpy as np
 
 class BaseLearner(nn.Module):
     def __init__(self, config):
@@ -229,54 +229,60 @@ def main(interaction, u_content, i_content):
             'userl2': [12, 1],
             'cluster_d': 5,
             'clusternum': [1, 3, 2, 1]}
-    # model = MetaLearner(config).cuda()
-    # perm = random.permutation(943)
-    # trains = perm[:800]
-    # tests = perm[800:]
-    # for _ in range(2000):
-    #     losses = []
-    #     for task_num in range(32):
-    #         user = trains[random.randint(0,800)]
-    #         tmp = interaction[interaction[:,0]==user]
-    #         per = random.permutation(tmp.shape[0])
-    #         spt = tmp[per[:5]]
-    #         qry = tmp[per[-3:]]
-    #         x_spt = torch.tensor(i_content[spt[:,1]]).float()
-    #         y_spt = torch.tensor(spt[:,2]).float()
-    #         x_qry = torch.tensor(i_content[qry[:,1]]).float()
-    #         y_qry = torch.tensor(qry[:,2]).float()
-    #         user_pf = torch.tensor(u_content[user]).float()
-    #         res, loss = model(x_spt.cuda(), y_spt.cuda(), x_qry.cuda(), y_qry.cuda(), user_pf.cuda())
-    #         losses.append(loss)
-    #     #print(torch.tensor(losses, requires_grad=True).mean())
-    #     model.meta_optim.zero_grad()
-    #     torch.stack(losses).mean().backward()
-    #     model.meta_optim.step()
-    #     if _ % 10 == 0:
-    #         print(res, torch.stack(losses).mean())
-    model = BaseLearner(config).cuda()
-    perm = random.permutation(943)
-    trains = perm[:800]
-    tests = perm[800:]
-    optimizer = optim.Adam(model.vars, lr=0.001)
-    for _ in range(2000):
-        losses = []
-        for task_num in range(32):
-            user = trains[random.randint(0,800)]
-            tmp = interaction[interaction[:,0]==user]
-            per = random.permutation(tmp.shape[0])
-            spt = tmp[per[:5]]
-            x_spt = torch.tensor(i_content[spt[:,1]]).float()
-            y_spt = torch.tensor(spt[:,2]).float()
-            user_pf = torch.tensor(u_content[user]).float()
-            res = model(user_pf.cuda(), x_spt.cuda(), model.vars)
-            loss = model.loss_func(res, y_spt.cuda())
-            losses.append(loss)
-        optimizer.zero_grad()
-        torch.stack(losses).mean().backward()
-        optimizer.step()
-        if _ % 10 == 0:
-            print(res, torch.stack(losses).mean())
+    
+    def usingMetalearner():
+        model = MetaLearner(config).cuda()
+        perm = random.permutation(943)
+        trains = perm[:800]
+        tests = perm[800:]
+        for _ in range(2000):
+            losses = []
+            for task_num in range(32):
+                user = trains[random.randint(0,800)]
+                tmp = interaction[interaction[:,0]==user]
+                per = random.permutation(tmp.shape[0])
+                spt = tmp[per[:5]]
+                qry = tmp[per[-3:]]
+                x_spt = torch.tensor(i_content[spt[:,1]]).float()
+                y_spt = torch.tensor(spt[:,2]).float()
+                x_qry = torch.tensor(i_content[qry[:,1]]).float()
+                y_qry = torch.tensor(qry[:,2]).float()
+                user_pf = torch.tensor(u_content[user]).float()
+                res, loss = model(x_spt.cuda(), y_spt.cuda(), x_qry.cuda(), y_qry.cuda(), user_pf.cuda())
+                losses.append(loss)
+            #print(torch.tensor(losses, requires_grad=True).mean())
+            model.meta_optim.zero_grad()
+            torch.stack(losses).mean().backward()
+            model.meta_optim.step()
+            if _ % 10 == 0:
+                print(res, torch.stack(losses).mean())
+    
+    def onlyBaselearner():
+        model = BaseLearner(config).cuda()
+        perm = random.permutation(943)
+        trains = perm[:800]
+        tests = perm[800:]
+        optimizer = optim.Adam(model.vars, lr=0.001)
+        for _ in range(2000):
+            losses = []
+            for task_num in range(32):
+                user = trains[random.randint(0,800)]
+                tmp = interaction[interaction[:,0]==user]
+                per = random.permutation(tmp.shape[0])
+                spt = tmp[per[:5]]
+                x_spt = torch.tensor(i_content[spt[:,1]]).float()
+                y_spt = torch.tensor(spt[:,2]).float()
+                user_pf = torch.tensor(u_content[user]).float()
+                res = model(user_pf.cuda(), x_spt.cuda(), model.vars)
+                loss = model.loss_func(res, y_spt.cuda())
+                losses.append(loss)
+            optimizer.zero_grad()
+            torch.stack(losses).mean().backward()
+            optimizer.step()
+            if _ % 10 == 0:
+                print(res, torch.stack(losses).mean())
+
+    usingMetalearner()
 
 if __name__ == '__main__':
     interaction, u_content, i_content = data()
