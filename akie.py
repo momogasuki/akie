@@ -10,12 +10,7 @@ import numpy as np
 
 import time
 
-def setup_seed(seed):
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-    torch.backends.cudnn.deterministic = True
+from autoint import AutoInt
 
 def data():
     path = "/home2/zh/data/ml-100k/u.data"
@@ -189,7 +184,7 @@ class BaseLearner(nn.Module):
 class MetaLearner(nn.Module):
     def __init__(self, config):
         super(MetaLearner, self).__init__()
-        self.net = BaseLearner(config)
+        self.net = AutoInt(config)
         self.config = config
         self.update_lr = [config['update_lr'][0]] * len(list(self.net.parameters()))
         for i, lr in config['update_lr'][1:]:

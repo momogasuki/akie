@@ -1,4 +1,4 @@
-from akie import MetaLearner, setup_seed
+from akie import MetaLearner
 
 import torch
 from torch import nn, optim
@@ -7,8 +7,10 @@ from torch.nn import ModuleList as ML
 from torch.nn import ParameterList as PL
 import numpy as np
 
-import time, pickle
+import time, pickle, argparse
 from sklearn.metrics import roc_auc_score
+
+from util import setup_seed
 
 def get_data():
     i_genre = np.load('/home2/zh/data/ml-1m/i_genre.npy')
@@ -55,18 +57,34 @@ if __name__ == '__main__':
     torch.cuda.set_device(6)
     data = get_data()
     i_genre, i_other, ui, x_genre, x_other, y = data
+    # config = {'num_embeddings': 3529,
+    #         'embedding_dim': 32,
+    #         'dim': [32*6+1, 64, 1],
+    #         'dropout': [0, 0],
+    #         'embedding_dim_meta': 32,
+    #         'userl2': 32*4+0,
+    #         'cluster_d': 32,
+    #         'clusternum': [1, 3, 2, 1],
+    #         'user_part': ([0,1,2,3], [], []),
+    #         'inner_steps': 3,
+    #         'batchsize': 256,
+    #         'learning_rate': [0.5, 0.5],
+    #         'update_lr': [0.05, (0, 0)],
+    #         'seed': 81192}
     config = {'num_embeddings': 3529,
+            'num_ctns': 1,
+            'fieldnum': 7,
             'embedding_dim': 32,
-            'dim': [32*6+1, 64, 1],
-            'dropout': [0, 0],
+            'headnum': 8,
+            'attention_dim': 64,
             'embedding_dim_meta': 32,
             'userl2': 32*4+0,
             'cluster_d': 32,
             'clusternum': [1, 3, 2, 1],
             'user_part': ([0,1,2,3], [], []),
             'inner_steps': 3,
-            'batchsize': 256,
-            'learning_rate': [0.5, 0.5],
+            'batchsize': 32,
+            'learning_rate': [0.07, 0.7],
             'update_lr': [0.05, (0, 0)],
             'seed': 81192}
     config['spt_qry_split'] = 'max(1/8, 4)'
@@ -83,7 +101,7 @@ if __name__ == '__main__':
                             {'params': list(model.parameters())[len(list(model.net.parameters())):], 'lr': config['learning_rate'][1]}])
     traucs, vaaucs, trloss, valoss = [], [], [], []
     labels_chkp, preds_chkp, losses_chkp = [], [], []
-    maxauc = 0.7
+    maxauc = 0
     test_auc, test_loss = 0, 0
     bestmodeldic = None
     for _ in range(config['batchnum']):
@@ -113,7 +131,8 @@ if __name__ == '__main__':
             trloss.append(train_loss)
             preds, losses, labels = [], [], []
             for user in user_set[perm[train_usernum:valid_usernum]]:
-                pred, loss, label = run0(model, data, user, 'valid')
+                with torch.no_grad():
+                    pred, loss, label = run0(model, data, user, 'valid')
                 preds.append(pred)
                 losses.append(loss)
                 labels.append(label)
@@ -130,7 +149,8 @@ if __name__ == '__main__':
                 if maxauc > 0.73:
                     preds, losses, labels = [], [], []
                     for user in user_set[perm[valid_usernum:]]:
-                        pred, loss, label = run0(model, data, user, 'test')
+                        with torch.no_grad():
+                            pred, loss, label = run0(model, data, user, 'test')
                         preds.append(pred)
                         losses.append(loss)
                         labels.append(label)
@@ -148,7 +168,7 @@ if __name__ == '__main__':
     
     res_this_try = [config, traucs, trloss, vaaucs, valoss]
 
-    if test_auc < 0.737:
+    if test_auc < 0.761:
         bestmodeldic = None
     res_this_try += [bestmodeldic, test_auc, test_loss]
     

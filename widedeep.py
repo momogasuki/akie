@@ -10,6 +10,7 @@ from sklearn.metrics import roc_auc_score
 from tqdm import tqdm
 
 from akie import BaseLearner, setup_seed
+from autoint import AutoInt
 
 class WideDeep(nn.Module):
     def __init__(self, config):
@@ -59,9 +60,9 @@ class WideDeep(nn.Module):
     def loss_func(self, pred, label):
         pred = pred.squeeze()
         label = label.squeeze()
-        num_1 = torch.sum(label)
-        num_0 = torch.sum(1-label)
-        num = num_1 + num_0
+        # num_1 = torch.sum(label)
+        # num_0 = torch.sum(1-label)
+        # num = num_1 + num_0
         # print(num_0.item(), num_1.item())
         # ret = -(pred.log()*label*num/(2*num_1+1e-10) + (1-pred).log()*(1-label)*num/(2*num_0+1e-10)).mean() # nn.BCELoss()
         # print(ret.item())
@@ -70,23 +71,21 @@ class WideDeep(nn.Module):
     
 def main(config):
     setup_seed(config['seed'])
-    model = WideDeep(config).cuda().double()
+    model = AutoInt(config).cuda().double()
     user_set = np.array(list(set(ui[:,0])))
     usernum = len(user_set)
     perm = random.permutation(usernum)
     train_usernum = int(0.8*usernum)
     valid_usernum = int(0.9*usernum)
-    optimizer = optim.SGD([{'params': list(model.parameters())[0], 'lr': config['lr'][0]},
-                            {'params': list(model.parameters())[1:], 'lr': config['lr'][1]}], lr=1)
-    sample_cnt = 0
+    optimizer = optim.SGD([{'params': list(model.parameters())[0:2], 'lr': config['lr'][0]},
+                            {'params': list(model.parameters())[2:], 'lr': config['lr'][1]}], lr=1)
     idx0 = np.where(np.isin(ui[:,0], user_set[perm[0:train_usernum]]))[0]
     vaaucs = []
     maxauc = 0
     bestmodeldic = None
     for _ in tqdm(range(5000)):
-        losses, reses, labels = [], [], []
         for T_T in range(1):
-            user = user_set[perm[random.randint(0,train_usernum)]]
+            user = user_set[perm[random.randint(0,train_usernum)]] # no use
             # idx = np.where(ui[:,0]==user)[0]
             # idx = idx[:-3] # keep 3 for query
             # idx = random.permutation(y.shape[0])[:100]
@@ -100,29 +99,32 @@ def main(config):
             label = torch.tensor(y[idx]).cuda().double()
             res = model(onehot_i, onehot_x, multihot_list, ctns)
             loss = model.loss_func(res, label)
-            losses.append(loss)
-            reses.append(res)
-            labels.append(label)
-            sample_cnt += len(label)
         optimizer.zero_grad()
-        torch.stack(losses).mean().backward()
+        
+        loss.mean().backward()
         optimizer.step()
         if _ % 10 == 0:
-            # print('---- batch {} ---- sample_cnt: {}'.format(_, sample_cnt))
-            # sample_cnt = 0
-            # from IPython import embed; embed(); exit()
-            idx = np.where(np.isin(ui[:,0], user_set[perm[train_usernum:valid_usernum]]))[0]
-            onehot_i = torch.tensor(i_other[idx,:-1]).cuda()
-            onehot_x = torch.tensor(x_other[idx,:-1]).cuda()
-            multihot_i = torch.tensor(i_genre[idx]).cuda()
-            multihot_x = torch.tensor(x_genre[idx]).cuda()
-            multihot_list = [(multihot_i, multihot_x)]
-            ctns = torch.tensor(x_other[idx,-1:]).cuda()
-            label = torch.tensor(y[idx]).cuda().double()
-            # from IPython import embed; embed(); exit()
-            model.eval()
-            res = model(onehot_i, onehot_x, multihot_list, ctns)
-            model.train()
+            idx1 = np.where(np.isin(ui[:,0], user_set[perm[train_usernum:valid_usernum]]))[0]
+            labels, reses = [], []
+            k = 4
+            for i in range(k):
+                l = len(idx1)
+                idx = idx1[int(i*l/k):int((i+1)*l/k)]
+                onehot_i = torch.tensor(i_other[idx,:-1]).cuda()
+                onehot_x = torch.tensor(x_other[idx,:-1]).cuda()
+                multihot_i = torch.tensor(i_genre[idx]).cuda()
+                multihot_x = torch.tensor(x_genre[idx]).cuda()
+                multihot_list = [(multihot_i, multihot_x)]
+                ctns = torch.tensor(x_other[idx,-1:]).cuda()
+                label = torch.tensor(y[idx]).cuda().double()
+                model.eval()
+                with torch.no_grad():
+                    res = model(onehot_i, onehot_x, multihot_list, ctns)
+                model.train()
+                labels.append(label)
+                reses.append(res)
+            label = torch.cat(labels)
+            res = torch.cat(reses)
             loss = model.loss_func(res, label)
             # print(roc_auc_score(array(torch.cat(labels).detach().cpu()), array(torch.cat(reses).detach().cpu())))
             # print(torch.stack(losses).mean())
@@ -132,8 +134,7 @@ def main(config):
             if auc > maxauc:
                 bestmodeldic = model.state_dict()
                 maxauc = auc
-            # print(loss.mean())
-            # print(label.shape)
+            print('auc = {}, maxauc = {}'.format(auc, maxauc))
             for pg in optimizer.param_groups:
                 if pg['lr'] > config['decay'][0]:
                     pg['lr'] *= config['decay'][1]
@@ -147,17 +148,26 @@ def main(config):
     logg_this_try = [config, vaaucs]
     if bestmodeldic:
         model.load_state_dict(bestmodeldic)
-        idx = np.where(np.isin(ui[:,0], user_set[perm[valid_usernum:]]))[0]
-        onehot_i = torch.tensor(i_other[idx,:-1]).cuda()
-        onehot_x = torch.tensor(x_other[idx,:-1]).cuda()
-        multihot_i = torch.tensor(i_genre[idx]).cuda()
-        multihot_x = torch.tensor(x_genre[idx]).cuda()
-        multihot_list = [(multihot_i, multihot_x)]
-        ctns = torch.tensor(x_other[idx,-1:]).cuda()
-        label = torch.tensor(y[idx]).cuda().double()
-        model.eval()
-        res = model(onehot_i, onehot_x, multihot_list, ctns)
-        model.train()
+        idx2 = np.where(np.isin(ui[:,0], user_set[perm[valid_usernum:]]))[0]
+        labels, reses = [], []
+        for i in range(k):
+            l = len(idx2)
+            idx = idx2[int(i*l/k):int((i+1)*l/k)]
+            onehot_i = torch.tensor(i_other[idx,:-1]).cuda()
+            onehot_x = torch.tensor(x_other[idx,:-1]).cuda()
+            multihot_i = torch.tensor(i_genre[idx]).cuda()
+            multihot_x = torch.tensor(x_genre[idx]).cuda()
+            multihot_list = [(multihot_i, multihot_x)]
+            ctns = torch.tensor(x_other[idx,-1:]).cuda()
+            label = torch.tensor(y[idx]).cuda().double()
+            model.eval()
+            with torch.no_grad():
+                res = model(onehot_i, onehot_x, multihot_list, ctns)
+            model.train()
+            labels.append(label)
+            reses.append(res)
+        label = torch.cat(labels)
+        res = torch.cat(reses)
         loss = model.loss_func(res, label).item()
         auc = roc_auc_score(array(label.detach().cpu()), array(res.detach().cpu()))
         logg_this_try += [auc, loss]
@@ -191,11 +201,21 @@ if __name__ == '__main__':
     #         'decay': [0.01, 0.98],
     #         'seed': 81192,
     #         'pkl_file': 'res_base.pkl'}
-    for lr in [[0.001, 1], [0.005, 0.5]]:
-        for dropout in [[0, 0, 0], [0.1, 0, 0], [0, 0, 0.5], [0.1, 0.1, 0.1]]:
-            for decay in [[0, 1]]:
-                config['lr'] = lr
-                config['dropout'] = dropout
-                config['decay'] = decay
-                print(config)
-                main(config)
+    # for lr in [[0.001, 1], [0.005, 0.5]]:
+    #     for dropout in [[0, 0, 0], [0.1, 0, 0], [0, 0, 0.5], [0.1, 0.1, 0.1]]:
+    #         for decay in [[0, 1]]:
+    #             config['lr'] = lr
+    #             config['dropout'] = dropout
+    #             config['decay'] = decay
+    #             print(config)
+    #             main(config)
+    main({'num_embeddings': 3529,
+            'num_ctns': 1,
+            'fieldnum': 7,
+            'embedding_dim': 32,
+            'headnum': 8,
+            'attention_dim': 64,
+            'lr': [0.05, 0.05],
+            'decay': [0, 1],
+            'pkl_file': 'res_autoint.pkl',
+            'seed': 81192})
